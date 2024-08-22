@@ -1,0 +1,172 @@
+name: Terraform CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  package-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl unzip python3-pip git zip
+
+      - name: Cache modules
+        id: cache-modules
+        uses: actions/cache@v3
+        with:
+          path: cache_modules/
+          key: ${{ github.ref_name }}
+
+      - name: Package Lambda function
+        run: |
+          cd source-code
+          zip -r ${{ github.run_id }}.zip *
+          cd ..
+          mkdir artifacts
+          mv source-code/${{ github.run_id }}.zip artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: lambda-package
+          path: artifacts/*
+
+  terraform-validate:
+    runs-on: ubuntu-latest
+    needs: package-build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download Lambda package
+        uses: actions/download-artifact@v3
+        with:
+          name: lambda-package
+
+      - name: Set up Terraform
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq tree
+          cd terraform
+          terraform --version
+          cp -R ../artifacts/* ./
+          terraform init \
+            -backend-config=organization=${{ secrets.TF_ORGANIZATION }} \
+            -backend-config=token=${{ secrets.TF_API_TOKEN }} -backend-config=retry_wait_min=5
+      - name: Set Workspace
+        run: |
+          terraform workspace select "${{ secrets.TF_WORKSPACE }}" || terraform workspace new "${{ secrets.TF_WORKSPACE }}"
+
+      - name: Validate Terraform
+        run: |
+          sed -i 's/<PAYLOAD_FILE>/${{ github.run_id }}/g' global_vars.tf
+          terraform validate
+          tree -f
+
+  terraform-plan:
+    runs-on: ubuntu-latest
+    needs: terraform-validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download Lambda package
+        uses: actions/download-artifact@v3
+        with:
+          name: lambda-package
+
+      - name: Set up Terraform
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq tree
+          cd terraform
+          terraform --version
+          cp -R ../artifacts/* ./
+          terraform init \
+            -backend-config=organization=${{ secrets.TF_ORGANIZATION }} \
+            -backend-config=token=${{ secrets.TF_API_TOKEN }} -backend-config=retry_wait_min=5
+      - name: Set Workspace
+        run: |
+          terraform workspace select "${{ secrets.TF_WORKSPACE }}" || terraform workspace new "${{ secrets.TF_WORKSPACE }}"
+
+      - name: Terraform Plan
+        run: |
+          sed -i 's/<PAYLOAD_FILE>/${{ github.run_id }}/g' global_vars.tf
+          terraform plan -out=plan_file
+          terraform show --json plan_file > plan.json
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-plan
+          path: plan_file
+
+  terraform-apply:
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download Lambda package and Plan
+        uses: actions/download-artifact@v3
+        with:
+          name: lambda-package
+
+      - name: Set up Terraform
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq tree
+          cd terraform
+          terraform --version
+          cp -R ../artifacts/* ./
+          terraform init \
+            -backend-config=organization=${{ secrets.TF_ORGANIZATION }} \
+            -backend-config=token=${{ secrets.TF_API_TOKEN }} -backend-config=retry_wait_min=5
+      - name: Set Workspace
+        run: |
+          terraform workspace select "${{ secrets.TF_WORKSPACE }}" || terraform workspace new "${{ secrets.TF_WORKSPACE }}"
+      - name: Terraform Apply
+        run: |
+          sed -i 's/<PAYLOAD_FILE>/${{ github.run_id }}/g' global_vars.tf
+          terraform apply --auto-approve
+
+  terraform-destroy:
+    runs-on: ubuntu-latest
+    needs: terraform-apply
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download Lambda package and Plan
+        uses: actions/download-artifact@v3
+        with:
+          name: lambda-package
+
+      - name: Set up Terraform
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq tree
+          cd terraform
+          terraform --version
+          cp -R ../artifacts/* ./
+          terraform init \
+            -backend-config=organization=${{ secrets.TF_ORGANIZATION }} \
+            -backend-config=token=${{ secrets.TF_API_TOKEN }} -backend-config=retry_wait_min=5
+      - name: Set Workspace
+        run: |
+          terraform workspace select "${{ secrets.TF_WORKSPACE }}" || terraform workspace new "${{ secrets.TF_WORKSPACE }}"
+      - name: Terraform Destroy
+        run: terraform destroy --auto-approve
