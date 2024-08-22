@@ -21,7 +21,6 @@ jobs:
           sudo apt-get install -y curl unzip python3-pip git zip
 
       - name: Cache modules
-        id: cache-modules
         uses: actions/cache@v3
         with:
           path: cache_modules/
@@ -31,9 +30,8 @@ jobs:
         run: |
           cd source-code
           zip -r ${{ github.run_id }}.zip *
-          cd ..
-          mkdir artifacts
-          mv source-code/${{ github.run_id }}.zip artifacts/
+          mkdir -p ../artifacts
+          mv ${{ github.run_id }}.zip ../artifacts/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
@@ -52,6 +50,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: lambda-package
+          path: artifacts # specify the correct path
 
       - name: Set up Terraform
         run: |
@@ -59,10 +58,12 @@ jobs:
           sudo apt-get install -y jq tree
           cd terraform
           terraform --version
-          cp -R ../artifacts/* ./
+          cp ../lambda-package/* ./ # adjust to use the downloaded artifact
           terraform init \
             -backend-config=organization=${{ secrets.TF_ORGANIZATION }} \
-            -backend-config=token=${{ secrets.TF_API_TOKEN }} -backend-config=retry_wait_min=5
+            -backend-config=token=${{ secrets.TF_API_TOKEN }} \
+            -backend-config=retry_wait_min=5
+
       - name: Set Workspace
         run: |
           terraform workspace select "${{ secrets.TF_WORKSPACE }}" || terraform workspace new "${{ secrets.TF_WORKSPACE }}"
@@ -91,10 +92,12 @@ jobs:
           sudo apt-get install -y jq tree
           cd terraform
           terraform --version
-          cp -R ../artifacts/* ./
+          cp ../lambda-package/* ./ # adjust to use the downloaded artifact
           terraform init \
             -backend-config=organization=${{ secrets.TF_ORGANIZATION }} \
-            -backend-config=token=${{ secrets.TF_API_TOKEN }} -backend-config=retry_wait_min=5
+            -backend-config=token=${{ secrets.TF_API_TOKEN }} \
+            -backend-config=retry_wait_min=5
+
       - name: Set Workspace
         run: |
           terraform workspace select "${{ secrets.TF_WORKSPACE }}" || terraform workspace new "${{ secrets.TF_WORKSPACE }}"
@@ -130,13 +133,16 @@ jobs:
           sudo apt-get install -y jq tree
           cd terraform
           terraform --version
-          cp -R ../artifacts/* ./
+          cp ../lambda-package/* ./ # adjust to use the downloaded artifact
           terraform init \
             -backend-config=organization=${{ secrets.TF_ORGANIZATION }} \
-            -backend-config=token=${{ secrets.TF_API_TOKEN }} -backend-config=retry_wait_min=5
+            -backend-config=token=${{ secrets.TF_API_TOKEN }} \
+            -backend-config=retry_wait_min=5
+
       - name: Set Workspace
         run: |
           terraform workspace select "${{ secrets.TF_WORKSPACE }}" || terraform workspace new "${{ secrets.TF_WORKSPACE }}"
+
       - name: Terraform Apply
         run: |
           sed -i 's/<PAYLOAD_FILE>/${{ github.run_id }}/g' global_vars.tf
@@ -161,12 +167,15 @@ jobs:
           sudo apt-get install -y jq tree
           cd terraform
           terraform --version
-          cp -R ../artifacts/* ./
+          cp ../lambda-package/* ./ # adjust to use the downloaded artifact
           terraform init \
             -backend-config=organization=${{ secrets.TF_ORGANIZATION }} \
-            -backend-config=token=${{ secrets.TF_API_TOKEN }} -backend-config=retry_wait_min=5
+            -backend-config=token=${{ secrets.TF_API_TOKEN }} \
+            -backend-config=retry_wait_min=5
+
       - name: Set Workspace
         run: |
           terraform workspace select "${{ secrets.TF_WORKSPACE }}" || terraform workspace new "${{ secrets.TF_WORKSPACE }}"
+
       - name: Terraform Destroy
         run: terraform destroy --auto-approve
